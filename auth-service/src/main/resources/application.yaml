@@ -1,0 +1,86 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: auth-service
+  jpa:
+    hibernate:
+      ddl-auto: none   # overridden per env
+    show-sql: false   # overridden per env
+  data:
+    mongodb:
+      auto-index-creation: true
+
+# Service Discovery server configuration (Eureka, or K8n own)
+eureka:
+  client:
+    register-with-eureka: true
+    fetch-registry: true
+  instance:
+    prefer-ip-address: true
+
+# Actuator and zipkin configurations
+management:
+  observation:
+    key-values:
+      application: ${spring.application.name}
+  tracing:
+    enabled: true
+    sampling:
+      probability: 1.0   # 100% traces (prod → 0.1 or less)
+    zipkin:
+      tracing:
+        endpoint: http://localhost:9411/api/v2/spans
+  endpoint:
+    health:
+      probes:
+        # CRITICAL: Enables /health/liveness and /health/readiness for K8s
+        enabled: true
+#      group:
+#        custom-group:
+#          # http://localhost:8084/manage/health/custom-group
+#          include: db, diskSpace
+#          show-details: always
+#    env:
+#      # Mask sensitive passwords/keys in the /env endpoint
+#      keys-to-sanitize: "password,secret,key,token,.*credentials.*,vcap_services"
+#      show-values: when_authorized
+#
+#  info:
+#    env:
+#      enabled: true
+#    git:
+#      mode: full # Requires git-commit-id-plugin to show git hash/branch
+#    java:
+#      enabled: true # Shows JVM version info
+
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus # Include ONLY what is needed for monitoring (Prometheus/Grafana)
+
+# Application logging
+logging:
+  pattern:
+    correlation: "[%X{traceId:-},%X{spanId:-}]"
+  level:
+    org.springframework.security: INFO # DEBUG
+
+# OpenAPI Swagger configurations
+#springdoc:
+#  swagger-ui:
+#    path: /swagger-ui.html
+
+# SMTP mail configuration
+mail:
+  host: smtp.mailtrap.io # or smtp.gmail.com
+  port: 2525 # 587 for Gmail
+  username: your_username
+  password: your_password
+  properties:
+    mail:
+      smtp:
+        auth: true
+        starttls:
+          enable: true

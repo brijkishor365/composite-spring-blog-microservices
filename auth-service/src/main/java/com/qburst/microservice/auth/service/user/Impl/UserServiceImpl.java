@@ -1,0 +1,226 @@
+package com.qburst.microservice.auth.service.user.Impl;
+
+import com.qburst.microservice.auth.cache.UserCacheService;
+import com.qburst.microservice.auth.document.BlacklistedToken;
+import com.qburst.microservice.auth.dto.request.auth.LoginRequest;
+import com.qburst.microservice.auth.dto.request.user.UserRequest;
+import com.qburst.microservice.auth.dto.response.auth.AuthResponse;
+import com.qburst.microservice.auth.dto.response.user.UserListResponse;
+import com.qburst.microservice.auth.dto.response.user.UserResponse;
+import com.qburst.microservice.auth.entity.UserEntity;
+import com.qburst.microservice.auth.exception.auth.*;
+import com.qburst.microservice.auth.exception.user.UserNameAlreadyExistsException;
+import com.qburst.microservice.auth.exception.user.UserNotFoundException;
+import com.qburst.microservice.auth.mapper.UserMapper;
+import com.qburst.microservice.auth.repository.BlacklistedTokenRepository;
+import com.qburst.microservice.auth.repository.UserRepository;
+import com.qburst.microservice.auth.service.email.EmailService;
+import com.qburst.microservice.auth.service.jwt.JwtService;
+import com.qburst.microservice.auth.service.user.UserService;
+import lombok.extern.slf4j.Slf4j;
+import org.modelmapper.ModelMapper;
+import org.slf4j.MDC;
+import org.springframework.cache.annotation.CachePut;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.InternalAuthenticationServiceException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Random;
+
+@Slf4j
+@Service
+public class UserServiceImpl implements UserService {
+
+    private final UserRepository userRepository;
+    private final ModelMapper modelMapper;
+    private final AuthenticationManager authenticationManager;
+    private final JwtService jwtService;
+    private final BlacklistedTokenRepository blacklistedTokenRepository;
+    private final EmailService emailService;
+    private final UserMapper userMapper;
+    private final BCryptPasswordEncoder passwordEncoder;
+    private final UserCacheService userCacheService;
+
+    public UserServiceImpl(
+            UserRepository userRepository,
+            ModelMapper modelMapper,
+            AuthenticationManager authenticationManager,
+            JwtService jwtService,
+            BlacklistedTokenRepository blacklistedTokenRepository,
+            EmailService emailService,
+            UserMapper userMapper,
+            UserCacheService userCacheService) {
+        this.userRepository = userRepository;
+        this.modelMapper = modelMapper;
+        this.authenticationManager = authenticationManager;
+        this.jwtService = jwtService;
+        this.blacklistedTokenRepository = blacklistedTokenRepository;
+        this.emailService = emailService;
+        this.userMapper = userMapper;
+        this.passwordEncoder = new BCryptPasswordEncoder(12);
+        this.userCacheService = userCacheService;
+    }
+
+    @Override
+    @Transactional
+    public UserResponse registerUser(UserRequest userRequest) throws Exception {
+
+        List<UserEntity> list = userRepository.findUserByUsername(userRequest.username());
+
+        if (!list.isEmpty()) {
+            throw new UserNameAlreadyExistsException("Username '" + userRequest.username() + "' is already taken.");
+        }
+
+        UserEntity userEntity = userMapper.toEntity(userRequest);
+
+        userEntity.setPassword(passwordEncoder.encode(userRequest.password()));
+        userEntity.setRoles("ROLE_USER");
+
+        UserEntity savedUser = userRepository.save(userEntity);
+
+        return userMapper.toResponse(savedUser);
+    }
+
+    @Override
+    public void logout(String authorization) {
+        if (authorization == null || !authorization.startsWith("Bearer ")) {
+            throw new UnauthorizedException("Missing or invalid Authorization header");
+        }
+
+        String token = authorization.substring(7);
+
+        try {
+            Instant expiry = jwtService.extractExpiry(token);
+            blacklistedTokenRepository.save(new BlacklistedToken(token, expiry));
+        } catch (Exception e) {
+            throw new TokenProcessingException("Failed to blacklist token");
+        }
+    }
+
+    @Override
+    public UserResponse getUserProfile(String username) {
+        UserEntity user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new UserNotFoundException("User not found: " + username));
+
+        return this.modelMapper.map(user, UserResponse.class);
+    }
+
+    @Override
+    public UserResponse getUserById(Long userId) {
+//        UserEntity user = userRepository.findById(userId)
+//                .orElseThrow(() -> new UserNotFoundException("User not found!: " + userId));
+//
+//        return this.modelMapper.map(user, UserResponse.class);
+
+        return userCacheService.getUserById(userId);
+    }
+
+    @Override
+    @Transactional
+    public void deleteUser(Long userId) {
+
+        UserEntity user = userRepository.findById(userId)
+                .orElseThrow(() -> new UserNotFoundException("User not found: " + userId));
+        userRepository.delete(user);
+
+        log.info("Successfully deleted user with ID: {}", userId);
+    }
+
+    public AuthResponse authenticate(LoginRequest request) {
+        try {
+            // This triggers UserDetailsService and checks the password
+            Authentication authentication = authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(request.username(), request.password())
+            );
+
+            UserDetails userDetails = (UserDetails) authentication.getPrincipal();
+            String token = jwtService.generateAccessToken(userDetails);
+
+//            if (userDetails instanceof UserPrincipal principal) {
+//                log.info("Login successful for User ID: {}", principal.getUserEntity().getId());
+//            }
+            log.info("User login successful: {}", userDetails.getUsername());
+
+            return new AuthResponse(token);
+
+        } catch (BadCredentialsException | InternalAuthenticationServiceException ex) {
+            // Map Spring's internal exceptions to your custom business exception
+            throw new InvalidUserNameOrPasswordException("Invalid username or password");
+        }
+    }
+
+    @Transactional
+    public UserResponse updateProfile(String username, UserRequest userUpdateRequest) {
+        // Find the existing user or throw exception
+        UserEntity userEntity = userRepository.findByUsername(username)
+                .orElseThrow(() -> new UserNotFoundException("User not found: " + username));
+
+        // Map only allowed fields (Manual or using ModelMapper)
+        // Avoid updating sensitive fields like roles or username here
+        if (userUpdateRequest.firstname() != null) userEntity.setFirstname(userUpdateRequest.firstname());
+        if (userUpdateRequest.lastname() != null) userEntity.setLastname(userUpdateRequest.lastname());
+        if (userUpdateRequest.email() != null) userEntity.setEmail(userUpdateRequest.email());
+
+        // Handle Password separately
+        if (userUpdateRequest.password() != null && !userUpdateRequest.password().isBlank()) {
+            userEntity.setPassword(passwordEncoder.encode(userUpdateRequest.password()));
+        }
+
+        // Save and return the DTO
+        UserEntity savedUser = userRepository.save(userEntity);
+
+        return modelMapper.map(savedUser, UserResponse.class);
+    }
+
+    public Page<UserListResponse> getUsers(Pageable pageable) {
+        return userRepository.findAll(pageable)
+                .map(user -> modelMapper.map(user, UserListResponse.class));
+    }
+
+    @Transactional
+    public void resetPassword(String email, String otp, String newPassword) {
+        UserEntity user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new UserNotFoundException("User not found"));
+
+        // Check Expiry
+        if (user.getOtpExpiry().isBefore(LocalDateTime.now())) {
+            throw new OtpExpiredException("OTP has expired");
+        }
+
+        // Validate OTP
+        if (!passwordEncoder.matches(otp, user.getOtp())) {
+            throw new InvalidOtpException("Invalid OTP");
+        }
+
+        // Success - Update Password and Clear OTP
+        user.setPassword(passwordEncoder.encode(newPassword));
+        user.setOtp(null);
+        user.setOtpExpiry(null);
+        userRepository.save(user);
+    }
+
+    public void requestPasswordReset(String email) {
+        UserEntity user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new UserNotFoundException("User not found with email: " + email));
+
+        // Generate 6-digit OTP
+        String otp = String.valueOf(new Random().nextInt(900000) + 100000);
+        user.setOtp(passwordEncoder.encode(otp)); // Securely hash the OTP
+        user.setOtpExpiry(LocalDateTime.now().plusMinutes(10)); // Valid for 10 mins
+
+        userRepository.save(user);
+
+        emailService.sendOtpEmail(user.getEmail(), otp);
+    }
+}

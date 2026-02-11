@@ -1,0 +1,58 @@
+spring:
+  config:
+    activate:
+      on-profile: dev
+
+  # Database connections
+  datasource:
+    url: jdbc:postgresql://localhost:5432/spring_auth_service
+    username: postgres
+    password: Root@1234
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+  data:
+    mongodb:
+      uri: mongodb://localhost:27017
+      database: spring_auth_service
+      auto-index-creation: true  # This is required for @Indexed to work
+  redis:
+    host: localhost
+    port: 6379
+    timeout: 2s
+  cache:
+    type: redis
+    redis:
+      time-to-live: 10m
+      cache-null-values: false
+
+# Service Discovery server configuration (Eureka, or K8n own)
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+
+# Application logging for dev env
+logging:
+  level:
+    org.springframework.security: DEBUG
+
+# OpenAPI Swagger configurations for dev env
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+
+mail:
+  host: smtp.mailtrap.io
+  port: 2525
+  username: your_username
+  password: your_password
+  properties:
+    mail:
+      smtp:
+        auth: true
+        starttls:
+          enable: true
