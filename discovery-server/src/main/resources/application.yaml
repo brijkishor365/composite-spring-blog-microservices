@@ -1,0 +1,23 @@
+spring:
+  application:
+    name: discovery-server
+
+server:
+  port: 8761
+
+eureka:
+  client:
+    # Since this IS the server, it shouldn't try to register with itself
+    register-with-eureka: false
+    fetch-registry: false
+
+# Actuator configurations
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus

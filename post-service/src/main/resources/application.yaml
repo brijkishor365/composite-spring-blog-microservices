@@ -1,0 +1,234 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: post-service
+  jpa:
+    hibernate:
+      ddl-auto: none   # overridden per env
+    show-sql: false   # overridden per env
+  data:
+    mongodb:
+      auto-index-creation: true
+
+  cloud:
+    openfeign:
+      circuitbreaker:
+        # Enables Resilience4j circuit breaker integration for Feign clients
+        # REQUIRED if you want Feign to use Resilience4j for CB, retry & timeout
+        enabled: true
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      auth-service:
+        # Number of calls to consider when calculating failure rate
+        # Sliding window can be COUNT_BASED (default) or TIME_BASED
+        slidingWindowSize: 20
+
+        # Minimum number of calls required before CB calculates failure rate
+        # Until this threshold, circuit remains CLOSED
+        minimumNumberOfCalls: 10
+
+        # Percentage of failed calls that will trip the circuit OPEN
+        # Example: 50 = 5 failures out of last 10 calls
+        failureRateThreshold: 50
+
+        # Time the circuit stays OPEN before switching to HALF_OPEN
+        # During OPEN state, all calls fail fast
+        waitDurationInOpenState: 15s
+
+        # (OPTIONAL) Number of test calls allowed in HALF_OPEN state
+        # If these succeed → circuit closes
+        # permittedNumberOfCallsInHalfOpenState: 3
+
+        # (OPTIONAL) Exception types that should count as failures
+        # recordExceptions:
+        #   - java.io.IOException
+        #   - feign.FeignException
+
+        # (OPTIONAL) Exception types that should NOT count as failures
+        # ignoreExceptions:
+        #   - com.example.exception.BadRequestException
+
+        # (OPTIONAL) Automatically transition from OPEN → HALF_OPEN
+        # If false, transition happens only on next call
+        # automaticTransitionFromOpenToHalfOpenEnabled: true
+
+  timelimiter:
+    instances:
+      auth-service:
+        # Maximum time a call is allowed to run
+        # If exceeded → TimeoutException → counts as failure
+        timeoutDuration: 2s
+
+        # (OPTIONAL) Cancel the running thread when timeout occurs
+        # Recommended true for reactive, false for blocking I/O
+        # cancelRunningFuture: true
+
+  retry:
+    instances:
+      auth-service:
+        # Total number of attempts (initial + retries)
+        maxAttempts: 2
+
+        # Wait time between retry attempts
+        waitDuration: 500ms
+
+        # (OPTIONAL) Enable exponential backoff
+        # waitDuration grows exponentially per attempt
+        # enableExponentialBackoff: true
+        # exponentialBackoffMultiplier: 2
+
+        # (OPTIONAL) Retry only for specific exceptions
+        # retryExceptions:
+        #   - java.io.IOException
+        #   - feign.RetryableException
+
+        # (OPTIONAL) Do NOT retry for these exceptions
+        # ignoreExceptions:
+        #   - feign.FeignException$BadRequest
+
+eureka:
+  client:
+    register-with-eureka: true
+    fetch-registry: true
+  instance:
+    prefer-ip-address: true
+
+management:
+  observation:
+    key-values:
+      application: ${spring.application.name}
+  tracing:
+    enabled: true
+    sampling:
+      probability: 1.0   # 100% traces (prod → 0.1 or less)
+
+    zipkin:
+      tracing:
+        endpoint: http://localhost:9411/api/v2/spans
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+feign:
+  client:
+    config:
+      default:
+        connectTimeout: 3000
+        readTimeout: 5000
+        loggerLevel: full
+
+#server:
+#  port: 8082
+#
+#spring:
+#  application:
+#    name: post-service
+#  datasource:
+#    url: jdbc:postgresql://localhost:5432/spring_post_service
+#    username: postgres
+#    password: Root@1234
+#  jpa:
+#    hibernate:
+#      ddl-auto: update
+#    show-sql: true
+#  data:
+#    mongodb:
+#      uri: mongodb://localhost:27017/spring_post_service
+#      auto-index-creation: true  # This is required for @Indexed to work
+#
+#eureka:
+#  client:
+#    service-url:
+#      defaultZone: http://localhost:8761/eureka/
+#    register-with-eureka: true
+#    fetch-registry: true
+#  instance:
+#    prefer-ip-address: true # Recommended for Docker/Cloud environments
+#
+#logging:
+#  level:
+#    org:
+#      springframework:
+#        security: DEBUG
+#
+##SMTP mail configuration
+#mail:
+#  host: smtp.mailtrap.io # or smtp.gmail.com
+#  port: 2525 # 587 for Gmail
+#  username: your_username
+#  password: your_password
+#  properties:
+#    mail:
+#      smtp:
+#        auth: true
+#        starttls:
+#          enable: true
+#
+## Actuator configurations
+#management:
+#  endpoint:
+#    health:
+#      probes:
+#        enabled: true
+#  endpoints:
+#    web:
+#      exposure:
+#        include: health,info,prometheus
+#
+#springdoc:
+#  swagger-ui:
+#    path: /swagger-ui.html
+
+
+
+#management:
+#  server:
+#    port: 8084
+#    # Optional: bind to internal network only
+#    # address: 127.0.0.1
+#
+#  endpoints:
+#    web:
+#      base-path: /manage # Obscurity: hide the fact that you use Actuator
+#      exposure:
+#        # Include ONLY what is needed for monitoring (Prometheus/Grafana)
+#        include: "health,info,prometheus,metrics"
+#
+#  endpoint:
+#    health:
+#      # Show full details only when the user is authorized (authenticated)
+#      show-details: when_authorized
+#      probes:
+#        # CRITICAL: Enables /health/liveness and /health/readiness for K8s
+#        enabled: true
+#      group:
+#        custom-group:
+#          # http://localhost:8084/manage/health/custom-group
+#          include: db, diskSpace
+#          show-details: always
+#
+#    env:
+#      # Mask sensitive passwords/keys in the /env endpoint
+#      keys-to-sanitize: "password,secret,key,token,.*credentials.*,vcap_services"
+#      show-values: when_authorized
+#
+#  info:
+#    env:
+#      enabled: true
+#    git:
+#      mode: full # Requires git-commit-id-plugin to show git hash/branch
+#    java:
+#      enabled: true # Shows JVM version info
